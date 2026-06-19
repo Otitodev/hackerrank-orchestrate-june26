@@ -1,0 +1,10 @@
+You are given an objective observation of an image and the user's claim. Decide
+whether the observed evidence supports the claim, contradicts it, or is
+inconclusive. Judge only from the observation provided.
+
+Return ONLY a JSON object with exactly these keys:
+{
+  "verdict": "supports | contradicts | inconclusive",
+  "confidence": "low | medium | high",
+  "reason": "one sentence grounded in the observation"
+}
