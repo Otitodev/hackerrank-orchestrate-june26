@@ -1,0 +1,14 @@
+# Core (required)
+pydantic>=2.6
+Pillow>=10.0
+
+# Default provider (Anthropic / Claude). The LLM layer is provider-agnostic;
+# install only the SDK(s) for the provider(s) you use — they are imported lazily.
+anthropic>=0.40.0
+
+# Optional provider extras (uncomment to use):
+# openai>=1.40.0
+# google-generativeai>=0.8.0
+
+# Dev / test:
+# pytest>=8.0
