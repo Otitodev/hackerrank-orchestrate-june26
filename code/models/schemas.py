@@ -188,7 +188,13 @@ class ImageAnalysis(BaseModel):
     visible_parts: List[str] = []
     damage_observed: List[str] = []
     quality_score: int = 0            # 0 = missing/unusable, 1-5 otherwise
-    authenticity_suspicion: bool = False
+    # Perceptual risk signals (map to the controlled risk_flags vocabulary).
+    low_light_or_glare: bool = False
+    wrong_angle: bool = False
+    cropped_or_obstructed: bool = False
+    authenticity_suspicion: bool = False   # digitally edited -> possible_manipulation
+    non_original_suspicion: bool = False    # stock/reused/AI -> non_original_image
+    wrong_part_suspicion: bool = False      # claimed part not the one shown
     text_instruction_present: bool = False
     verdict: str = "inconclusive"     # supports | contradicts | inconclusive
     confidence: str = "low"

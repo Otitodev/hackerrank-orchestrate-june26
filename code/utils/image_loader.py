@@ -18,12 +18,29 @@ from .csv_loader import DATASET_DIR
 
 MAX_DIMENSION = 1568          # Anthropic vision recommendation
 MAX_ENCODED_BYTES = 5 * 1024 * 1024
-_MEDIA_TYPES = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".webp": "image/webp",
-}
+
+# Media types accepted directly by the vision APIs (Anthropic/OpenAI/Gemini).
+# NOTE: dataset files all carry a ``.jpg`` extension but are actually a mix of
+# JPEG / PNG / WEBP / AVIF, so we must sniff the real format from magic bytes
+# rather than trusting the suffix (a wrong media_type is a hard 400 error).
+_SUPPORTED_MEDIA = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
+
+def sniff_media_type(data: bytes) -> Optional[str]:
+    """Return the real image media type from magic bytes, or ``None`` if unknown."""
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[4:12] in (b"ftypavif", b"ftypavis"):
+        return "image/avif"          # not directly supported -> transcode
+    if data[4:12] in (b"ftypheic", b"ftypheix", b"ftypmif1"):
+        return "image/heic"          # not directly supported -> transcode
+    return None
 
 
 @dataclass
@@ -63,28 +80,37 @@ def resolve_image_paths(
 def encode_image(abs_path: Path) -> Optional[Tuple[str, str]]:
     """Return ``(base64_data, media_type)`` for an image, or ``None`` if missing.
 
-    Oversized images are downscaled to ``MAX_DIMENSION`` and re-encoded as JPEG.
-    Pillow is imported lazily so the loader stays importable without it.
+    The media type is determined by sniffing the real bytes (the dataset's
+    ``.jpg`` files are a mix of JPEG/PNG/WEBP/AVIF). Directly-supported formats
+    that fit the size limit are passed through untouched; everything else
+    (AVIF/HEIC, unknown, or oversized) is transcoded to JPEG and downscaled to
+    ``MAX_DIMENSION``. Pillow is imported lazily.
     """
     if not abs_path.is_file():
         return None
 
-    media_type = _MEDIA_TYPES.get(abs_path.suffix.lower(), "image/jpeg")
     raw = abs_path.read_bytes()
+    media_type = sniff_media_type(raw)
 
-    # Fast path: small enough and a directly-supported type.
-    if len(raw) <= MAX_ENCODED_BYTES and abs_path.suffix.lower() in _MEDIA_TYPES:
+    # Fast path: a directly-supported format that fits the byte budget.
+    if media_type in _SUPPORTED_MEDIA and len(raw) <= MAX_ENCODED_BYTES:
         return base64.standard_b64encode(raw).decode("ascii"), media_type
 
+    # Otherwise transcode to JPEG (handles AVIF/HEIC, unknown, or oversized).
     try:
         from PIL import Image
     except ImportError:
-        # No Pillow: fall back to sending the raw bytes as-is.
-        return base64.standard_b64encode(raw).decode("ascii"), media_type
+        if media_type in _SUPPORTED_MEDIA:
+            # No Pillow but format is usable as-is (just oversized): send raw.
+            return base64.standard_b64encode(raw).decode("ascii"), media_type
+        return None  # can't transcode an unsupported format without Pillow
 
-    with Image.open(io.BytesIO(raw)) as img:
-        img = img.convert("RGB")
-        img.thumbnail((MAX_DIMENSION, MAX_DIMENSION))
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=90)
+    try:
+        with Image.open(io.BytesIO(raw)) as img:
+            img = img.convert("RGB")
+            img.thumbnail((MAX_DIMENSION, MAX_DIMENSION))
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=90)
+    except Exception:
+        return None  # unreadable/corrupt image -> caller treats as missing
     return base64.standard_b64encode(buf.getvalue()).decode("ascii"), "image/jpeg"

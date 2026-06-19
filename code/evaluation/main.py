@@ -21,6 +21,10 @@ from pathlib import Path
 CODE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CODE_DIR))
 
+from utils.env import load_env_file  # noqa: E402
+
+load_env_file()  # pick up code/.env before provider auto-detection
+
 from models.schemas import LIST_SEP, NONE_SENTINEL  # noqa: E402
 from pipeline.orchestrator import process_claim  # noqa: E402
 from utils.csv_loader import (  # noqa: E402

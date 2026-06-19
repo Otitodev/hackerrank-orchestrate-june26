@@ -1,0 +1,17 @@
+2026-06-19 18:25:42,122 INFO evidence_review: provider=mock model=mock mode=single
+2026-06-19 18:25:42,374 INFO evidence_review: processed 10/44 claims
+2026-06-19 18:25:42,430 INFO evidence_review: processed 20/44 claims
+2026-06-19 18:25:42,581 INFO evidence_review: processed 30/44 claims
+2026-06-19 18:25:42,701 INFO evidence_review: processed 40/44 claims
+2026-06-19 18:25:43,512 INFO evidence_review: done: 44 rows -> C:\Users\DELL\AppData\Local\Temp\out_check.csv | calls=170 in_tok=20400 out_tok=10200 images=82 est_cost=$0.0000
+2026-06-19 18:29:50,711 INFO evidence_review: provider=anthropic model=claude-sonnet-4-6 mode=single
+2026-06-19 18:30:01,081 ERROR evidence_review: claim 1 (user=user_002) failed: anthropic call failed after retries: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'messages.0.content.0.image.source.base64.data: Image format image/jpeg not supported'}, 'request_id': 'req_011CcD1ptDoVqEiC5yKg8wWb'}
+2026-06-19 18:30:01,084 INFO evidence_review: done: 0 rows -> C:\Users\DELL\AppData\Local\Temp\smoke.csv | calls=2 in_tok=1361 out_tok=310 images=1 est_cost=$0.0087
+2026-06-19 18:32:01,240 INFO evidence_review: provider=anthropic model=claude-sonnet-4-6 mode=single
+2026-06-19 18:32:17,785 INFO evidence_review: done: 1 rows -> C:\Users\DELL\AppData\Local\Temp\smoke.csv | calls=5 in_tok=5676 out_tok=984 images=3 est_cost=$0.0318
+2026-06-19 18:37:29,095 INFO evidence_review: provider=anthropic model=claude-sonnet-4-6 mode=single
+2026-06-19 18:39:30,926 INFO evidence_review: processed 10/44 claims
+2026-06-19 18:41:33,082 INFO evidence_review: processed 20/44 claims
+2026-06-19 18:43:34,839 INFO evidence_review: processed 30/44 claims
+2026-06-19 18:45:41,299 INFO evidence_review: processed 40/44 claims
+2026-06-19 18:46:33,520 INFO evidence_review: done: 44 rows -> C:\Users\DELL\hackerrank-orchestrate-june26\output.csv | calls=153 in_tok=147807 out_tok=26341 images=82 est_cost=$0.8385

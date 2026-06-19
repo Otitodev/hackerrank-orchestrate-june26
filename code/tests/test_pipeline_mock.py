@@ -46,6 +46,40 @@ def test_pipeline_runs_on_full_sample_offline():
         assert d["severity"] in {"none", "low", "medium", "high", "unknown"}
 
 
+def test_risk_escalation_serious_vs_soft_flags():
+    """manual_review_required fires on serious/trust flags, not soft quality ones."""
+    from models.schemas import ClaimObject, ImageAnalysis, RiskFlag, StructuredClaim
+    from pipeline.risk_assessor import assess_risk
+
+    claim = StructuredClaim(claim_object=ClaimObject.car, claimed_part="door")
+
+    # Soft-only signal (wrong angle) must NOT escalate.
+    soft = ImageAnalysis(image_id="img_1", detected_object="car",
+                         visible_parts=["door"], damage_observed=["dent"],
+                         quality_score=4, wrong_angle=True)
+    flags = assess_risk(claim, "nobody", [soft], {}).risk_flags
+    assert RiskFlag.wrong_angle in flags
+    assert RiskFlag.manual_review_required not in flags
+
+    # Serious signal (non-original) MUST escalate.
+    serious = ImageAnalysis(image_id="img_1", detected_object="car",
+                            visible_parts=["door"], damage_observed=["dent"],
+                            quality_score=4, non_original_suspicion=True)
+    flags = assess_risk(claim, "nobody", [serious], {}).risk_flags
+    assert RiskFlag.non_original_image in flags
+    assert RiskFlag.manual_review_required in flags
+
+
+def test_requirement_matcher_routes_by_family():
+    """The fuzzy matcher routes each issue family to its object-specific rule."""
+    from utils.csv_loader import load_requirements, match_requirement
+
+    reqs = load_requirements()
+    assert match_requirement(reqs, "car", "glass_shatter", "cracked windshield").requirement_id == "REQ_CAR_GLASS_LIGHT_MIRROR"
+    assert match_requirement(reqs, "car", "dent", "dent on door").requirement_id == "REQ_CAR_BODY_PANEL"
+    assert match_requirement(reqs, "package", "water_damage", "water stain").requirement_id == "REQ_PACKAGE_LABEL_OR_STAIN"
+
+
 def test_make_client_defaults_to_mock_without_keys(monkeypatch):
     for env in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY",
                 "LLM_PROVIDER", "LLM_MODEL"):

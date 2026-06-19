@@ -15,6 +15,7 @@ from models.schemas import (
     RiskFlag,
     Severity,
 )
+from utils.csv_loader import match_requirement
 from utils.image_loader import resolve_image_paths
 from utils.llm import LLMClient
 
@@ -37,17 +38,29 @@ async def process_claim(
 ) -> OutputRow:
     structured = await parse_claim(claim, client, refs.allowed_families)
 
+    # Single best-match evidence rule for this claim; drives both the evidence
+    # reason and the synthesiser context (the rulebook is no longer ignored).
+    requirement = match_requirement(
+        refs.requirements,
+        claim.claim_object.value,
+        structured.issue_family,
+        structured.claimed_damage or "",
+    )
+
     images = resolve_image_paths(claim.image_paths)
     analyses = await asyncio.gather(
         *[analyse_image(img, structured, client, mode) for img in images]
     )
 
-    evidence = check_evidence(structured, list(analyses), refs.requirements)
+    evidence = check_evidence(structured, list(analyses), requirement)
     risk = assess_risk(structured, claim.user_id, list(analyses), refs.history)
 
     # ---- Decision ladder (TRD §6) -------------------------------------
-    # Priority 1: evidence/usability gate fails -> not_enough_information.
-    if not evidence.valid_image or not evidence.evidence_standard_met:
+    # Priority 1: the evidence standard is the gate to a verdict. Calibrated on
+    # the labeled sample: evidence_standard_met=false always maps to
+    # not_enough_information. valid_image alone does NOT force NEI (a usable but
+    # not-fully-standard image set can still yield a confident contradiction).
+    if not evidence.evidence_standard_met:
         return _row(
             claim,
             evidence,
@@ -61,7 +74,9 @@ async def process_claim(
         )
 
     # Priorities 2-5: handled by the synthesiser over structured context.
-    synth = await synthesise(structured, list(analyses), evidence, risk, client)
+    synth = await synthesise(
+        structured, list(analyses), evidence, risk, client, requirement
+    )
     if synth is None:
         flags = list(risk.risk_flags)
         if RiskFlag.manual_review_required not in flags:

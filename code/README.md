@@ -57,9 +57,11 @@ python code/main.py                 # dataset/claims.csv -> output.csv
 LLM_PROVIDER=openai LLM_MODEL=gpt-4o python code/main.py
 ```
 
-Secrets are read from environment variables only. Rows are written
-incrementally to `output.csv` (crash-safe); a runtime `run.log` is written
-alongside.
+Secrets are read from environment variables only. For convenience a local
+`code/.env` file (`KEY=VALUE` lines, git-ignored) is auto-loaded at startup by
+both entry points — put `ANTHROPIC_API_KEY=...` there instead of exporting it.
+Rows are written incrementally to `output.csv` (crash-safe); a runtime
+`run.log` is written alongside.
 
 ## Evaluate
 

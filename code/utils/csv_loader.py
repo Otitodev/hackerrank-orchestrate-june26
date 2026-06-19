@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 from models.schemas import (
     OUTPUT_COLUMNS,
@@ -89,6 +89,63 @@ def select_requirements(
         r for r in requirements
         if r.claim_object in (claim_object, "all")
     ]
+
+
+_STOPWORDS = {"or", "and", "the", "a", "an", "of", "to", "claim", "review", "part"}
+
+
+def _tokens(text: str) -> set[str]:
+    return {
+        t for t in "".join(c if c.isalnum() else " " for c in text.lower()).split()
+        if t and t not in _STOPWORDS
+    }
+
+
+def _fuzzy_overlap(a: set[str], b: set[str]) -> int:
+    """Count token matches, treating words that share a 4+ char prefix as equal
+    (so ``cracked``/``crack``, ``scratches``/``scratch`` match)."""
+    score = 0
+    for x in a:
+        for y in b:
+            if x == y or (len(x) >= 4 and len(y) >= 4 and (x.startswith(y) or y.startswith(x))):
+                score += 1
+                break
+    return score
+
+
+def match_requirement(
+    requirements: Iterable[Requirement],
+    claim_object: str,
+    issue_family: str = "",
+    claimed_damage: str = "",
+) -> Optional[Requirement]:
+    """Pick the single most relevant requirement for a claim.
+
+    Scores object-specific rows by word overlap between their ``applies_to``
+    family and the parsed issue family / claimed damage. Falls back to the most
+    general applicable rule when nothing scores. ``applies_to`` is fuzzy prose
+    (e.g. ``"dent or scratch"``), so this is a best-effort lexical match.
+    """
+    applicable = select_requirements(requirements, claim_object)
+    if not applicable:
+        return None
+
+    query = _tokens(f"{issue_family} {claimed_damage}")
+    best: Optional[Requirement] = None
+    best_score = 0
+    for r in applicable:
+        score = _fuzzy_overlap(_tokens(r.applies_to), query)
+        # Prefer object-specific rows over generic "all" rows on ties.
+        if r.claim_object == claim_object:
+            score += 0 if score == 0 else 1
+        if score > best_score:
+            best, best_score = r, score
+
+    if best is not None:
+        return best
+    # No lexical hit: prefer the object's general rule, else the first "all" rule.
+    obj_rows = [r for r in applicable if r.claim_object == claim_object]
+    return (obj_rows or applicable)[0]
 
 
 def write_output(rows: Iterable[OutputRow], path: Path | str) -> int:

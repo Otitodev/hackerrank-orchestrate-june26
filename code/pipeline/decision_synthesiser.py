@@ -16,6 +16,7 @@ from models.schemas import (
     EvidenceResult,
     ImageAnalysis,
     OBJECT_PARTS,
+    Requirement,
     RiskResult,
     StructuredClaim,
     SynthesiserOutput,
@@ -30,6 +31,7 @@ def _bundle(
     analyses: List[ImageAnalysis],
     evidence: EvidenceResult,
     risk: RiskResult,
+    requirement: Optional[Requirement],
 ) -> str:
     lines = [
         f"Claim object: {claim.claim_object.value}",
@@ -37,6 +39,10 @@ def _bundle(
         f"Claimed part: {claim.claimed_part or 'unspecified'}",
         f"Issue family: {claim.issue_family}",
         f"Allowed object_part values: {sorted(OBJECT_PARTS[claim.claim_object])}",
+    ]
+    if requirement and requirement.minimum_image_evidence:
+        lines.append(f"Minimum evidence standard: {requirement.minimum_image_evidence}")
+    lines += [
         "",
         "Image evidence:",
     ]
@@ -76,9 +82,10 @@ async def synthesise(
     evidence: EvidenceResult,
     risk: RiskResult,
     client: LLMClient,
+    requirement: Optional[Requirement] = None,
 ) -> Optional[SynthesiserOutput]:
     system = load_prompt("synthesiser")
-    bundle = _bundle(claim, analyses, evidence, risk)
+    bundle = _bundle(claim, analyses, evidence, risk, requirement)
     valid_ids = {a.image_id for a in analyses}
 
     for attempt in range(2):

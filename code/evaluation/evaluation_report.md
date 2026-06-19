@@ -27,6 +27,33 @@ patterns (e.g. `contradicted → supported` false positives), which guide prompt
 tuning of Step 5.1 (parser) and Step 5.5 (synthesiser). Per the overfitting
 guard, only prompt wording is tuned — never claim-specific answers.
 
+## 1a. Measured results (real run)
+
+Measured on `dataset/sample_claims.csv` (n=20), provider `anthropic`, model
+`claude-sonnet-4-6`, single strategy, `temperature=0`:
+
+| Metric | Score |
+|---|---|
+| `claim_status` accuracy | 0.50 |
+| `evidence_standard_met` accuracy | 0.65 |
+| `valid_image` accuracy | 0.90 |
+| `severity` accuracy | 0.25 |
+| risk-flag precision / recall | 0.42 / 0.86 |
+| sample-set cost | $0.33 (63 calls, 29 images) |
+
+Confusion (`claim_status`): the dominant error is over-routing to
+`not_enough_information` — `supported→not_enough_information` (4) and
+`contradicted→not_enough_information` (3) — i.e. the evidence gate
+(`evidence_standard_met`) is too strict, which also caps `claim_status` accuracy.
+Risk-flag **recall is strong (0.86)** after wiring the full perceptual-flag set
+and the `manual_review_required` escalation rule; **precision (0.42) is the next
+lever** — the VLM over-asserts `non_original_image` / `claim_mismatch` on these
+stock-like dataset images, which then over-triggers manual review. Both are
+prompt-tuning / threshold opportunities, not structural gaps.
+
+Full test run (`dataset/claims.csv`, n=44): **153 model calls, 82 images,
+$0.84** measured.
+
 ## 2. Two-strategy comparison
 
 The required comparison is **single structured call per image** (primary) vs
@@ -65,6 +92,10 @@ the number of submitted images. Evidence and risk steps are rule-based (0 calls)
 | **test (`claims.csv`)** | 44 | 82 | **170** | 252 |
 
 Test image distribution: 13 claims × 1 img, 24 × 2 img, 7 × 3 img = 82 images.
+
+> **Measured:** the real test run made **153 calls** (not the 170 upper bound):
+> the synthesiser is skipped on rows where the evidence gate fails (NEI), so
+> calls = 44 parser + 82 image + 27 synthesiser. Sample run = 63 calls.
 
 ### 3.2 Token & cost estimate (test set, single strategy)
 
