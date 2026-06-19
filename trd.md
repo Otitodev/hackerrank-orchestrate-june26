@@ -4,9 +4,20 @@
 
 **HackerRank Orchestrate — June 2026**
 **Author:** Otito Ogene
-**Version:** 1.0
+**Version:** 1.1
 **Date:** June 19, 2026
-**Status:** Draft
+**Status:** Draft — reconciled against actual repo schema
+
+> **v1.1 changelog (schema reconciliation).** v1.0 was written from assumed
+> schemas. After inspecting the real `dataset/` files and `problem_statement.md`,
+> the following were corrected: input/output column names, separators (semicolon,
+> not pipe/comma), the decision enum (`not_enough_information`, not
+> `insufficient_evidence`), the full `risk_flags` / `issue_type` / `object_part`
+> controlled vocabularies, the `user_history.csv` and `evidence_requirements.csv`
+> schemas (the latter has **no** numeric `min_images` — requirements are
+> natural-language guidance), image naming (`case_NNN/img_N.jpg`, no `claim_id`),
+> the 5-value severity set, the split between `valid_image` and
+> `evidence_standard_met`, and the entry-point/folder contract.
 
 -----
 
@@ -56,46 +67,67 @@ For each claim, decide whether submitted image evidence **supports**, **contradi
 
 |File                       |Location  |Description                                               |
 |---------------------------|----------|----------------------------------------------------------|
-|`sample_claims.csv`        |`dataset/`|Labeled rows for development and evaluation               |
-|`claims.csv`               |`dataset/`|Unlabeled rows — agent runs on this file                  |
-|`user_history.csv`         |`dataset/`|Per-user historical claim and risk data                   |
-|`evidence_requirements.csv`|`dataset/`|Minimum image requirements by object type and issue family|
-|Images                     |`images/` |JPEG/PNG files referenced by `image_ids` in claims        |
+|`sample_claims.csv`        |`dataset/`|Labeled rows for development and evaluation (20 rows)     |
+|`claims.csv`               |`dataset/`|Unlabeled rows — agent runs on this file (44 rows)        |
+|`user_history.csv`         |`dataset/`|Per-user historical claim and risk data (47 users)        |
+|`evidence_requirements.csv`|`dataset/`|Natural-language minimum-evidence guidance (11 rules)     |
+|Images                     |`dataset/images/{sample,test}/case_NNN/`|JPEG files referenced by `image_paths` in claims|
 
-### 2.2 `claims.csv` schema
+### 2.2 `claims.csv` schema (actual)
 
-|Field         |Type  |Description                    |
-|--------------|------|-------------------------------|
-|`claim_id`    |string|Unique claim identifier        |
-|`user_id`     |string|References `user_history.csv`  |
-|`object_type` |enum  |`car` | `laptop` | `package`   |
-|`conversation`|string|Raw support chat text          |
-|`image_ids`   |string|Comma-separated image filenames|
+There is **no `claim_id` column.** Rows are identified by position and by
+echoing the four input columns into the output.
 
-### 2.3 `user_history.csv` schema (expected)
+|Field         |Type  |Description                                                  |
+|--------------|------|-------------------------------------------------------------|
+|`user_id`     |string|References `user_history.csv`                                |
+|`image_paths` |string|**Semicolon**-separated relative paths, e.g. `images/test/case_001/img_1.jpg;images/test/case_001/img_2.jpg`|
+|`user_claim`  |string|Raw support chat transcript                                  |
+|`claim_object`|enum  |`car` \| `laptop` \| `package`                               |
 
-|Field          |Type  |Description            |
-|---------------|------|-----------------------|
-|`user_id`      |string|User identifier        |
-|`total_claims` |int   |Lifetime claim count   |
-|`recent_claims`|int   |Claims in last 90 days |
-|`fraud_flags`  |int   |Prior flagged incidents|
+The **image ID** is the filename without extension (e.g. `img_1`). Image IDs
+are not globally unique — every `case_NNN` folder has its own `img_1` — so index
+images per-claim, never in a global map.
 
-### 2.4 `evidence_requirements.csv` schema (expected)
+### 2.3 `user_history.csv` schema (actual)
 
-|Field            |Type  |Description                 |
-|-----------------|------|----------------------------|
-|`object_type`    |enum  |`car` | `laptop` | `package`|
-|`issue_family`   |string|Normalised damage category  |
-|`min_images`     |int   |Minimum image count required|
-|`required_angles`|string|Expected viewpoints or parts|
+|Field                     |Type  |Description / observed range                 |
+|--------------------------|------|---------------------------------------------|
+|`user_id`                 |string|User identifier                              |
+|`past_claim_count`        |int   |Lifetime claim count (0–14)                  |
+|`accept_claim`            |int   |Historically accepted claims (0–4)           |
+|`manual_review_claim`     |int   |Historically manually-reviewed claims (0–4)  |
+|`rejected_claim`          |int   |Historically rejected claims (0–7)           |
+|`last_90_days_claim_count`|int   |Recent claim count (0–9)                     |
+|`history_flags`           |string|**Precomputed** semicolon-separated flags: `none`, `user_history_risk`, `manual_review_required` (or a combination)|
+|`history_summary`         |string|Free-text risk summary                       |
+
+> **Key:** `history_flags` already encodes the history-derived risk. The Risk
+> Assessor should **read `history_flags` directly** rather than invent count
+> thresholds. (`fraud_flags` from v1.0 does not exist.)
+
+### 2.4 `evidence_requirements.csv` schema (actual)
+
+|Field                  |Type  |Description                                            |
+|-----------------------|------|-------------------------------------------------------|
+|`requirement_id`       |string|Rule identifier, e.g. `REQ_CAR_BODY_PANEL`             |
+|`claim_object`         |enum  |`car` \| `laptop` \| `package` \| **`all`**            |
+|`applies_to`           |string|Fuzzy issue family, e.g. `"dent or scratch"`, `"crack, broken, or missing part"`|
+|`minimum_image_evidence`|string|**Natural-language** sentence describing what must be visible|
+
+> **Critical:** there is **no integer `min_images` and no `required_angles`
+> field.** `minimum_image_evidence` is prose guidance, several rules apply to
+> `all`, and multiple rules can apply to one claim. The evidence check therefore
+> cannot be an arithmetic count gate (see §5.3); it is a soft, guidance-driven
+> assessment.
 
 ### 2.5 Image format assumptions
 
-- Accepted formats: `.jpg`, `.jpeg`, `.png`, `.webp`
-- Naming convention: TBD from repo inspection — likely `{claim_id}_{index}.jpg`
-- Images are loaded from disk and base64-encoded for the Anthropic Vision API
-- Images exceeding 5MB are resized to a max dimension of 1568px before encoding (Anthropic limit)
+- Format on disk: `.jpg` (loader still accepts `.jpeg`, `.png`, `.webp`).
+- Layout: `dataset/images/{sample,test}/case_NNN/img_N.jpg`. Ignore `.DS_Store`.
+- `image_id` = filename stem (`img_1`). Paths in `image_paths` are repo-relative.
+- Images are loaded from disk and base64-encoded for the Anthropic Vision API.
+- Images exceeding 5MB are resized to a max dimension of 1568px before encoding (Anthropic limit).
 
 -----
 
@@ -103,36 +135,70 @@ For each claim, decide whether submitted image evidence **supports**, **contradi
 
 ### 3.1 `output.csv` schema
 
-|Field                 |Type  |Allowed values                                                                 |
-|----------------------|------|-------------------------------------------------------------------------------|
-|`claim_id`            |string|As provided in input                                                           |
-|`decision`            |enum  |`supported` | `contradicted` | `insufficient_evidence`                         |
-|`issue_type`          |string|Specific damage label (e.g. `cracked_screen`, `dented_panel`, `torn_packaging`)|
-|`object_part`         |string|Relevant object part (e.g. `display`, `hood`, `outer_box`)                     |
-|`supporting_image_ids`|string|Pipe-separated image IDs that drove the decision                               |
-|`flags`               |string|Pipe-separated list of raised risk signals                                     |
-|`severity`            |enum  |`low` | `medium` | `high`                                                      |
-|`justification`       |string|1–2 sentences grounded in image evidence                                       |
+**14 columns, in this exact order.** The first four **echo the input row verbatim.**
 
+|#|Field                       |Type  |Allowed values / format                                                  |
+|-|----------------------------|------|-------------------------------------------------------------------------|
+|1|`user_id`                   |string|Echoed from input                                                        |
+|2|`image_paths`               |string|Echoed from input (semicolon-separated)                                  |
+|3|`user_claim`                |string|Echoed from input                                                        |
+|4|`claim_object`              |enum  |Echoed from input: `car` \| `laptop` \| `package`                        |
+|5|`evidence_standard_met`     |bool  |`true` if the image set is sufficient to evaluate the claim, else `false`|
+|6|`evidence_standard_met_reason`|string|Short reason for the evidence decision                                 |
+|7|`risk_flags`                |string|**Semicolon**-separated risk flags, or `none` (see §3.2)                 |
+|8|`issue_type`                |enum  |Controlled vocab (see §3.2)                                              |
+|9|`object_part`               |enum  |Controlled vocab, per object type (see §3.2)                            |
+|10|`claim_status`             |enum  |`supported` \| `contradicted` \| `not_enough_information`                |
+|11|`claim_status_justification`|string|1–2 sentences grounded in image evidence; mention image IDs when helpful|
+|12|`supporting_image_ids`     |string|**Semicolon**-separated image IDs (e.g. `img_1;img_2`), or `none`        |
+|13|`valid_image`              |bool  |`true` if the image set is usable for automated review, else `false`     |
+|14|`severity`                 |enum  |`none` \| `low` \| `medium` \| `high` \| `unknown`                       |
 
-> **Note:** Separator character for `supporting_image_ids` and `flags` (pipe vs comma) must be confirmed against the exact schema in `problem_statement.md`.
+> **Separators are confirmed:** semicolon for `risk_flags` and
+> `supporting_image_ids`; empty lists are the literal string `none`.
+> `claim_status` is `not_enough_information` (**not** `insufficient_evidence`).
 
-### 3.2 Valid flag values
+### 3.2 Controlled vocabularies
 
-|Flag           |Trigger                                                    |
-|---------------|-----------------------------------------------------------|
-|`history_risk` |User has elevated prior claim count or fraud flags         |
-|`image_quality`|One or more images scored below quality threshold          |
-|`mismatch`     |Image detected object type does not match claim object type|
-|`authenticity` |VLM suspects image is stock photo or digitally altered     |
+**`claim_status`:** `supported`, `contradicted`, `not_enough_information`
 
-### 3.3 Severity mapping
+**`issue_type`:** `dent`, `scratch`, `crack`, `glass_shatter`, `broken_part`,
+`missing_part`, `torn_packaging`, `crushed_packaging`, `water_damage`, `stain`,
+`none`, `unknown`. Use `none` when the part is visible and undamaged; `unknown`
+when it cannot be determined.
 
-|Decision               |Severity derivation                                                                                    |
-|-----------------------|-------------------------------------------------------------------------------------------------------|
-|`insufficient_evidence`|Always `low` — damage cannot be assessed                                                               |
-|`contradicted`         |`medium` if minor mismatch; `high` if claim is clearly fabricated                                      |
-|`supported`            |Derived from damage description: `low` (surface), `medium` (functional), `high` (structural/total loss)|
+**`object_part`** (depends on `claim_object`):
+- car: `front_bumper`, `rear_bumper`, `door`, `hood`, `windshield`, `side_mirror`, `headlight`, `taillight`, `fender`, `quarter_panel`, `body`, `unknown`
+- laptop: `screen`, `keyboard`, `trackpad`, `hinge`, `lid`, `corner`, `port`, `base`, `body`, `unknown`
+- package: `box`, `package_corner`, `package_side`, `seal`, `label`, `contents`, `item`, `unknown`
+
+**`risk_flags`** (semicolon-separated, or `none`):
+`none`, `blurry_image`, `cropped_or_obstructed`, `low_light_or_glare`,
+`wrong_angle`, `wrong_object`, `wrong_object_part`, `damage_not_visible`,
+`claim_mismatch`, `possible_manipulation`, `non_original_image`,
+`text_instruction_present`, `user_history_risk`, `manual_review_required`
+
+Rough sourcing of flags:
+
+|Flag family                                              |Source                                                          |
+|---------------------------------------------------------|----------------------------------------------------------------|
+|`blurry_image`, `low_light_or_glare`, `cropped_or_obstructed`, `wrong_angle`|Image Analyser quality/framing observation       |
+|`wrong_object`, `wrong_object_part`, `claim_mismatch`, `damage_not_visible`|Image vs claim comparison                         |
+|`possible_manipulation`, `non_original_image`            |VLM authenticity suspicion (stock / edited)                     |
+|`text_instruction_present`                               |VLM detects embedded text trying to instruct the model (image prompt-injection)|
+|`user_history_risk`, `manual_review_required`            |Read directly from `user_history.history_flags`                 |
+
+### 3.3 Severity mapping (5-value set)
+
+|`claim_status`           |Severity derivation                                                                    |
+|-------------------------|---------------------------------------------------------------------------------------|
+|`not_enough_information` |`unknown` (cannot be assessed) or `none` when no damage is the finding                 |
+|`contradicted`           |`none`/`low` for minor mismatch; up to `high` when the claim is clearly unsupported     |
+|`supported`              |From damage extent: `low` (surface), `medium` (functional), `high` (structural/total loss)|
+
+> Calibrate against `sample_claims.csv`: observed severity distribution is
+> `medium`×11, `low`×3, `unknown`×3, `none`×2, `high`×1. Do not force gated rows
+> to `low` (v1.0 was wrong here).
 
 -----
 
@@ -288,47 +354,48 @@ Pass 1 output + claim context are both provided.
 
 **Inputs:**
 
-- Structured claim from Step 5.1 (`object_type`, `issue_family`)
+- Structured claim from Step 5.1 (`claim_object`, `issue_family`)
 - List of image analyser results from Step 5.2
 - `evidence_requirements.csv` loaded into memory at startup
 
-**Logic:**
+**Logic (soft, guidance-driven — there is no numeric `min_images`):**
 
 ```
-1. Look up row in evidence_requirements where
-   object_type == claim.object_type AND issue_family == claim.issue_family
+1. Select applicable requirement rows:
+   rows where claim_object in (claim.claim_object, "all"),
+   optionally narrowed by fuzzy-matching the claim's issue family
+   against `applies_to`. Multiple rows may apply; collect all.
 
-2. If no matching row found:
-   → evidence_ok = False, reason = "unknown_issue_family"
+2. valid_image  = at least one image is usable for automated review
+                  (quality_score >= 3 AND not authenticity-suspect AND
+                   no text-instruction injection).
 
-3. If len(images) < row.min_images:
-   → evidence_ok = False, reason = "insufficient_image_count"
+3. evidence_standard_met = valid_image AND at least one image clearly
+   shows the claimed object and the claimed part well enough to inspect
+   the claimed condition (per the selected requirements' prose).
 
-4. If required_angles defined and not all angles covered by visible_parts across images:
-   → evidence_ok = False, reason = "missing_required_angles"
-
-5. Otherwise:
-   → evidence_ok = True
+4. evidence_standard_met_reason = short human reason, e.g.
+   "rear bumper visible and dent inspectable" /
+   "claimed part not visible in any submitted image" /
+   "all images too blurry to assess".
 ```
+
+`valid_image` (technical usability) and `evidence_standard_met` (claim-specific
+coverage) are **distinct** output fields — do not collapse them.
 
 **Output:**
 
 ```json
 {
-  "evidence_ok": true
+  "valid_image": true,
+  "evidence_standard_met": true,
+  "evidence_standard_met_reason": "The claimed rear bumper is clearly visible and the dent can be inspected."
 }
 ```
 
-or
-
-```json
-{
-  "evidence_ok": false,
-  "reason": "insufficient_image_count"
-}
-```
-
-**Important:** If `evidence_ok` is `False`, the pipeline short-circuits. Decision is set to `insufficient_evidence` and Steps 5.4–5.5 still run for flags, but the verdict is locked.
+**Important:** If `evidence_standard_met` is `false`, the claim cannot be
+adjudicated from evidence — `claim_status` is locked to
+`not_enough_information`. Steps 5.4–5.5 still run for flags and justification.
 
 -----
 
@@ -342,26 +409,28 @@ or
 - Image analyser results from Step 5.2
 - `user_history.csv` loaded into memory at startup
 
-**Flag generation rules:**
+**Flag generation rules** (output values must come from the §3.2 vocabulary):
 
-|Flag           |Rule                                                                                                     |
-|---------------|---------------------------------------------------------------------------------------------------------|
-|`history_risk` |`total_claims >= 5` OR `recent_claims >= 3` OR `fraud_flags >= 1` (thresholds TBD from data distribution)|
-|`image_quality`|Any image has `quality_score < 3`                                                                        |
-|`mismatch`     |Any image has `detected_object != claim.object_type`                                                     |
-|`authenticity` |Any image has `authenticity_suspicion == true`                                                           |
+|Source flag(s)                                                            |Rule                                                                 |
+|--------------------------------------------------------------------------|---------------------------------------------------------------------|
+|`user_history_risk`, `manual_review_required`                             |**Read directly** from `user_history.history_flags` for this `user_id` and pass through|
+|`blurry_image`, `low_light_or_glare`, `cropped_or_obstructed`, `wrong_angle`|Any image flagged with the corresponding quality/framing defect    |
+|`wrong_object`, `wrong_object_part`                                       |Detected object / part does not match the claim                       |
+|`claim_mismatch`, `damage_not_visible`                                    |Claimed damage absent or inconsistent across all images               |
+|`possible_manipulation`, `non_original_image`                             |Image Analyser authenticity suspicion                                 |
+|`text_instruction_present`                                                |Image Analyser detected embedded instruction text                     |
 
 **Notes:**
 
-- If `user_id` is not in `user_history.csv`, skip `history_risk` silently — do not crash
-- Multiple flags are additive
-- Flags feed into the output row but **do not alter the verdict**
+- If `user_id` is not in `user_history.csv`, skip the history flags silently — do not crash.
+- Multiple flags are additive; join with `;`. If none, emit the literal `none`.
+- Flags feed the output row but **do not alter `claim_status`**.
 
 **Output:**
 
 ```json
 {
-  "flags": ["image_quality", "history_risk"]
+  "risk_flags": ["blurry_image", "user_history_risk"]
 }
 ```
 
@@ -391,29 +460,34 @@ Claim: User claims a cracked laptop display after dropping the device.
 Object type: laptop | Issue family: display_damage
 
 Image evidence:
-- CLM001_1.jpg: laptop detected, visible parts: [display, keyboard], damage: [spider fracture, cracked bezel], quality: 4/5, verdict: supports (high confidence)
-- CLM001_2.jpg: laptop detected, visible parts: [bottom panel], damage: none observed, quality: 3/5, verdict: inconclusive
+- img_1: laptop detected, visible parts: [screen, keyboard], damage: [spider fracture, cracked bezel], quality: 4/5, verdict: supports (high confidence)
+- img_2: laptop detected, visible parts: [base], damage: none observed, quality: 3/5, verdict: inconclusive
 
-Evidence requirements met: yes (2 of 2 images provided)
-Flags raised: []
+Evidence standard met: yes (screen clearly inspectable in img_1)
+Flags raised: none
 
-Produce a verdict.
+Produce a verdict using only the allowed vocabularies.
 ```
 
-**Output:**
+**Output (synthesiser-owned fields only; the loader echoes the 4 input columns
+and the rule layer supplies `evidence_standard_met*`/`valid_image`):**
 
 ```json
 {
-  "decision": "supported",
-  "issue_type": "cracked_screen",
-  "object_part": "display",
-  "supporting_image_ids": ["CLM001_1.jpg"],
+  "claim_status": "supported",
+  "issue_type": "crack",
+  "object_part": "screen",
+  "supporting_image_ids": ["img_1"],
   "severity": "high",
-  "justification": "CLM001_1 shows a clear spider-fracture pattern across the display panel, consistent with the user's claim of impact damage. CLM001_2 provides no contradicting evidence."
+  "claim_status_justification": "img_1 shows a clear spider-fracture across the screen, consistent with the claimed impact damage; img_2 shows no contradicting evidence."
 }
 ```
 
-**Validation:** Output is parsed into a Pydantic model before writing to CSV. On validation failure (wrong enum value, missing field), the step retries once with an explicit correction prompt. If it fails twice, the row is written with `decision = "insufficient_evidence"` and flagged for manual review.
+**Validation:** Output is parsed into a Pydantic model (strict enums) before
+writing to CSV. On validation failure (bad enum, missing field), retry once with
+an explicit correction prompt. If it fails twice, write a fallback row with
+`claim_status = "not_enough_information"` and add `manual_review_required` to
+`risk_flags`.
 
 -----
 
@@ -422,29 +496,31 @@ Produce a verdict.
 The final decision follows a deterministic priority ladder:
 
 ```
-Priority 1 — Evidence gate failed?
-  → decision = insufficient_evidence, severity = low
-  → STOP
+Priority 1 — evidence_standard_met == false (or valid_image == false)?
+  → claim_status = not_enough_information, severity = unknown
+  → STOP (synthesiser not called for the verdict)
 
-Priority 2 — Any image shows object type mismatch?
-  → decision = contradicted, flag = mismatch
-  → severity = medium (minor) or high (major discrepancy)
+Priority 2 — Any image shows wrong_object / wrong_object_part vs the claim?
+  → claim_status = contradicted, flag = wrong_object / wrong_object_part / claim_mismatch
+  → severity = low (minor) … high (clearly unsupported)
   → STOP
 
 Priority 3 — All image verdicts = "contradicts"?
-  → decision = contradicted
+  → claim_status = contradicted
   → severity from synthesiser
 
-Priority 4 — At least one image verdict = "supports" and evidence gate passed?
-  → decision = supported
+Priority 4 — At least one image verdict = "supports" and evidence standard met?
+  → claim_status = supported
   → severity from synthesiser
 
 Priority 5 — Mixed or inconclusive signals?
-  → decision = insufficient_evidence
-  → severity = low
+  → claim_status = not_enough_information
+  → severity = unknown
 ```
 
-The LLM synthesiser handles Priority 3–5. Priorities 1 and 2 are rule-enforced before the synthesiser is called.
+The LLM synthesiser handles Priority 3–5. Priorities 1 and 2 are rule-enforced
+before the synthesiser is called. Note `not_enough_information` takes severity
+`unknown`/`none`, never a forced `low`.
 
 -----
 
@@ -454,26 +530,39 @@ Before running on `claims.csv`, evaluate against `sample_claims.csv` which has k
 
 ### Metrics
 
-|Metric               |Field          |Weight                |
-|---------------------|---------------|----------------------|
-|Decision accuracy    |`decision`     |Primary               |
-|Severity accuracy    |`severity`     |Secondary             |
-|Flag recall          |`flags`        |Secondary             |
-|Justification quality|`justification`|Qualitative (AI judge)|
+|Metric               |Field                       |Weight                |
+|---------------------|----------------------------|----------------------|
+|Decision accuracy    |`claim_status`              |Primary               |
+|Evidence-gate accuracy|`evidence_standard_met`, `valid_image`|Secondary    |
+|Severity accuracy    |`severity`                  |Secondary             |
+|Flag recall/precision|`risk_flags`                |Secondary             |
+|Justification quality|`claim_status_justification`|Qualitative (AI judge)|
+
+### Required deliverables (per README + problem_statement)
+
+1. Metrics on `dataset/sample_claims.csv`.
+2. **At least two strategies / prompts / model configurations compared** (e.g.
+   single-pass vs two-pass image analysis, or Sonnet-only vs Sonnet+Opus on hard
+   rows). Record both in the report.
+3. The final strategy chosen for `output.csv`.
+4. `evaluation/evaluation_report.md` with an **operational analysis**: approximate
+   model-call count, input/output token usage, images processed, estimated cost
+   (state pricing assumptions), runtime/latency, and TPM/RPM + batching/throttling/
+   caching/retry strategy.
 
 ### Eval loop
 
 ```
 1. Run full pipeline on sample_claims.csv
-2. Compare output.decision to expected.decision for each row
-3. Compute accuracy, false positive rate (supported → actually contradicted), false negative rate
-4. Identify failure patterns in prompt output
-5. Adjust Step 5.1 (claim parser) or Step 5.5 (synthesiser) prompts
-6. Re-run until decision accuracy is acceptable
-7. Run on claims.csv — do not touch prompts again after this point
+2. Compare output.claim_status to expected.claim_status per row
+3. Compute accuracy, FP rate (supported → actually contradicted), FN rate
+4. Identify failure patterns; adjust Step 5.1 / 5.5 prompts (wording only)
+5. Re-run until decision accuracy is acceptable
+6. Lock prompts, run on claims.csv
 ```
 
-**Overfitting guard:** Tune prompt wording only. Never hard-code claim-specific answers. The system must generalise.
+**Overfitting guard:** Tune prompt wording only. Never hard-code claim-specific
+answers. The system must generalise.
 
 -----
 
@@ -500,26 +589,29 @@ All errors are written to a `run.log` file alongside `output.csv` for post-run i
 
 ```python
 # At startup, load all reference data into memory once
-user_history = load_csv("dataset/user_history.csv")       # dict keyed by user_id
-evidence_reqs = load_csv("dataset/evidence_requirements.csv")  # dict keyed by (object_type, issue_family)
-allowed_issue_families = list(evidence_reqs.keys())
+user_history = load_user_history("dataset/user_history.csv")     # dict keyed by user_id
+evidence_reqs = load_requirements("dataset/evidence_requirements.csv")  # list of rules
+# Requirements are grouped by claim_object (incl. "all"); matching to a claim is
+# fuzzy on `applies_to`, so we keep the rows and select applicable ones per claim
+# rather than building a single (object, family) lookup key.
 ```
 
 ### Per-claim execution
 
 ```python
-for claim in claims:
-    structured_claim = claim_parser(claim.conversation, claim.object_type)
+for claim in claims:                      # claim has user_id, image_paths, user_claim, claim_object
+    structured_claim = claim_parser(claim.user_claim, claim.claim_object)
 
     image_results = await asyncio.gather(*[
-        image_analyser(img, structured_claim) for img in claim.images
+        image_analyser(img, structured_claim) for img in claim.images   # img.image_id == filename stem
     ])
 
-    evidence_result = evidence_checker(structured_claim, image_results)
-    risk_result = risk_assessor(claim.user_id, image_results)
-    final_output = decision_synthesiser(structured_claim, image_results, evidence_result, risk_result)
+    evidence_result = evidence_checker(structured_claim, image_results, evidence_reqs)
+    risk_result = risk_assessor(claim.user_id, image_results, user_history)
+    verdict = decision_synthesiser(structured_claim, image_results, evidence_result, risk_result)
 
-    write_row(output_csv, final_output)
+    # Output row echoes the 4 input columns, then merges rule + synthesiser fields
+    write_row(output_csv, build_output_row(claim, evidence_result, risk_result, verdict))
 ```
 
 ### Rate limiting
@@ -568,6 +660,10 @@ for claim in claims:
 
 ## 12. Project File Structure
 
+> **Entry-point contract (AGENTS.md §6.1):** the evaluator looks for
+> `code/main.py` and `code/evaluation/main.py`, and the submitted `code.zip`
+> must contain an `evaluation/` folder. Use `evaluation/` (not `eval/`).
+
 ```
 code/
 ├── main.py                    # Entry point — reads claims.csv, writes output.csv
@@ -584,8 +680,9 @@ code/
 │   ├── csv_loader.py          # Load and index all reference CSVs
 │   ├── image_loader.py        # File path resolution, base64 encoding, resize
 │   └── logger.py              # Logging setup → run.log
-├── eval/
-│   └── evaluate.py            # Run against sample_claims.csv, print metrics
+├── evaluation/
+│   ├── main.py                # Evaluation entry point (run on sample_claims.csv)
+│   └── evaluation_report.md   # Metrics + strategy comparison + operational analysis
 ├── prompts/
 │   ├── claim_parser.txt       # Prompt template for Step 5.1
 │   ├── image_blind.txt        # Pass 1 prompt for Step 5.2
